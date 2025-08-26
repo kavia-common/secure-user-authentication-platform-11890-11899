@@ -749,7 +749,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Dashboard data including user, session_info, and stats",
             "content": {
               "application/json": {
                 "schema": {
@@ -757,6 +757,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized or invalid session"
+          },
+          "500": {
+            "description": "Server error loading dashboard data"
           },
           "422": {
             "description": "Validation Error",
