@@ -316,49 +316,72 @@ async def reset_password(request: PasswordResetConfirmRequest) -> JSONResponse:
 
 @router.get(
     "/verify-email",
-    response_model=MessageResponse,
     summary="Verify Email",
     description="Verify user email with token"
 )
 async def verify_email(token: str, email: str) -> JSONResponse:
     """
     Verify user email with token
-    
+
     Verifies the user's email address using the token received via email.
-    
-    - **token**: Email verification token
-    - **email**: User's email address
+    On success, returns a friendly message and a preliminary access token
+    with flags: email_verified=True and 2fa_completed=False so frontend
+    can seamlessly proceed to the 2FA step.
+
+    - token: Email verification token
+    - email: User's email address
     """
     try:
         logger.info(f"Email verification attempt for: {email}")
-        
-        # Verify email with Supabase
+
+        # Verify email with Supabase (and ensure metadata updates)
         success, result = await supabase_service.verify_email(token, email)
-        
+
         if not success:
             error_msg = result.get("error", "Invalid verification token")
             logger.error(f"Email verification failed for {email}: {error_msg}")
-            
-            raise HTTPException(
+
+            return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired verification token"
+                content={
+                    "message": "The verification link is invalid or has expired. Please request a new verification email.",
+                    "success": False
+                }
             )
-        
+
+        user = result.get("user")
+        # Create a preliminary session to move user into 2FA step
+        # This mirrors login behavior but sets 2FA incomplete.
+        email_verified_flag = True
+        session_data = session_service.create_session(
+            user_id=user.id,
+            user_email=user.email,
+            additional_data={
+                "email_verified": email_verified_flag,
+                "2fa_completed": False
+            }
+        )
+
         logger.info(f"Email verified successfully for: {email}")
-        
+
+        # Provide a user-friendly message and include token for frontend to immediately prompt 2FA
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
-                "message": "Email verified successfully. You can now log in to your account.",
-                "success": True
+                "message": "Email verified successfully! For your security, please complete 2FA to finish signing in.",
+                "success": True,
+                "access_token": session_data["access_token"],
+                "token_type": "bearer",
+                "expires_in": session_data["expires_in"]
             }
         )
-        
-    except HTTPException:
-        raise
+
     except Exception as e:
         logger.error(f"Error during email verification for {email}: {str(e)}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred during email verification"
+            content={
+                "message": "We couldn't verify your email due to a server error. Please try again shortly.",
+                "success": False
+            }
         )

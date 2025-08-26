@@ -123,7 +123,9 @@ async def verify_2fa_otp(
         
         logger.info(f"2FA OTP verification attempt for: {user_email}")
         
-        # Ensure this is a preliminary session that still requires 2FA
+        # Ensure this is a preliminary session that still requires 2FA.
+        # Preliminary sessions are created either on successful password login
+        # (email verified) or after successful email verification.
         token_payload = current_user.get("token_payload", {})
         if token_payload.get("2fa_completed", False):
             logger.info(f"2FA already completed for: {user_email}")

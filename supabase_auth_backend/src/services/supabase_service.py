@@ -225,28 +225,54 @@ class SupabaseService:
     # PUBLIC_INTERFACE
     async def verify_email(self, token: str, email: str) -> Tuple[bool, Dict[str, Any]]:
         """
-        Verify user email with token
-        
+        Verify user email with token and ensure user meta is updated, and a fresh
+        preliminary session is available for subsequent 2FA.
+
         Args:
             token: Email verification token
             email: User's email address
-            
+
         Returns:
             Tuple of (success: bool, result: Dict)
+            On success, result contains:
+            {
+                "user": <user_object>,
+                "session": <session_or_none>,
+                "email_verified": True
+            }
         """
         try:
+            # Verify email via OTP
             response = self.supabase.auth.verify_otp({
                 "email": email,
                 "token": token,
                 "type": "email"
             })
-            
-            if response.user:
-                logger.info(f"Email verified successfully for: {email}")
-                return True, {"user": response.user, "session": response.session}
-            else:
-                return False, {"error": "Invalid verification token"}
-                
+
+            if not response or not response.user:
+                return False, {"error": "Invalid or expired verification token"}
+
+            user = response.user
+            logger.info(f"Email verified via OTP for: {email}")
+
+            # Ensure user metadata reflects email_verified = True
+            try:
+                # Some SDKs may already set email_confirmed_at, but we persist a meta flag for downstream logic
+                meta_updates = {"email_verified": True}
+                update_resp = self.admin_client.auth.admin.update_user_by_id(user.id, user_data={"user_metadata": meta_updates})
+                if getattr(update_resp, "user", None):
+                    user = update_resp.user  # refresh local user reference
+                    logger.info(f"User metadata updated with email_verified=True for: {email}")
+            except Exception as meta_err:
+                logger.warning(f"Unable to update user metadata email_verified for {email}: {str(meta_err)}")
+
+            # The Supabase verify_otp may or may not return a session. We return it through for the caller
+            return True, {
+                "user": user,
+                "session": getattr(response, "session", None),
+                "email_verified": True
+            }
+
         except Exception as e:
             logger.error(f"Error verifying email for {email}: {str(e)}")
             return False, {"error": str(e)}
