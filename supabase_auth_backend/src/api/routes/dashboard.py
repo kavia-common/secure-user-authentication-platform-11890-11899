@@ -17,25 +17,58 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
     "/",
     response_model=DashboardData,
     summary="Get Dashboard Data",
-    description="Get comprehensive dashboard data for authenticated user"
+    description="Get comprehensive dashboard data for authenticated user",
+    responses={
+        200: {
+            "description": "Dashboard data including user, session_info, and stats",
+        },
+        401: {
+            "description": "Unauthorized or invalid session",
+        },
+        500: {
+            "description": "Server error loading dashboard data",
+        },
+    },
 )
 async def get_dashboard_data(current_user: Dict[str, Any] = Depends(get_current_2fa_user)) -> JSONResponse:
     """
-    Get comprehensive dashboard data for authenticated user
-    
-    Retrieves user profile information, session details, and usage statistics
-    for display on the protected dashboard. Requires completed 2FA.
+    Dashboard endpoint that returns the user's dashboard data.
+
+    PUBLIC_INTERFACE
+    Returns:
+        JSONResponse: Object matching components.schemas.DashboardData
+            - user (UserResponse): User information
+            - session_info (object): Session information with timestamps in ISO 8601
+            - stats (object): User statistics (e.g., total_active_sessions, account_age_days, security_score)
+
+    Notes:
+        - Requires completed 2FA (protected via dependency get_current_2fa_user).
+        - Timestamps are serialized to ISO 8601 strings for OpenAPI compatibility.
     """
     try:
         user_id = current_user["user_id"]
         user_email = current_user["email"]
         session_id = current_user["session_id"]
-        
+
         logger.info(f"Dashboard data request for: {user_email}")
-        
-        # Get user profile information
+
+        # Extract token payload (may contain profile fields)
         token_payload = current_user.get("token_payload", {})
-        
+
+        # Normalize created_at and last_sign_in_at to datetime if strings
+        def parse_dt(value):
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except Exception:
+                    return None
+            return None
+
+        created_at = parse_dt(token_payload.get("created_at")) or datetime.utcnow()
+        last_sign_in_at = parse_dt(token_payload.get("last_sign_in_at"))
+
         user_response = UserResponse(
             id=user_id,
             email=user_email,
@@ -43,80 +76,68 @@ async def get_dashboard_data(current_user: Dict[str, Any] = Depends(get_current_
             last_name=token_payload.get("last_name"),
             phone=token_payload.get("phone"),
             email_verified=token_payload.get("email_verified", False),
-            created_at=token_payload.get("created_at"),
-            last_sign_in_at=token_payload.get("last_sign_in_at")
+            created_at=created_at,
+            last_sign_in_at=last_sign_in_at,
         )
-        
+
         # Get session information
         session_info = session_service.get_session_info(session_id)
         if not session_info:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid session"
+                detail="Invalid session",
             )
-        
+
         # Calculate session statistics
-        session_duration = datetime.utcnow() - session_info["created_at"]
-        time_until_expiry = session_info["expires_at"] - datetime.utcnow()
-        
+        now = datetime.utcnow()
+        session_created = session_info["created_at"]
+        session_expires = session_info["expires_at"]
+        session_last_activity = session_info["last_activity"]
+
+        session_duration = now - session_created
+        time_until_expiry = session_expires - now
+
+        # Serialize timestamps to ISO strings
         session_data = {
             "session_id": session_id,
-            "created_at": session_info["created_at"],
-            "last_activity": session_info["last_activity"],
-            "expires_at": session_info["expires_at"],
+            "created_at": session_created.isoformat() + "Z" if session_created.tzinfo is None else session_created.isoformat(),
+            "last_activity": session_last_activity.isoformat() + "Z" if session_last_activity.tzinfo is None else session_last_activity.isoformat(),
+            "expires_at": session_expires.isoformat() + "Z" if session_expires.tzinfo is None else session_expires.isoformat(),
             "session_duration_minutes": int(session_duration.total_seconds() / 60),
             "time_until_expiry_minutes": max(0, int(time_until_expiry.total_seconds() / 60)),
-            "is_active": session_info["is_active"]
+            "is_active": session_info["is_active"],
         }
-        
+
         # Get user statistics
-        total_sessions = len([
-            s for s in session_service.active_sessions.values()
-            if s["user_id"] == user_id
-        ])
-        
+        total_active_for_user = len(
+            [s for s in session_service.active_sessions.values() if s["user_id"] == user_id]
+        )
+
         # Calculate account age
-        account_created = token_payload.get("created_at")
-        account_age_days = 0
-        if account_created:
-            if isinstance(account_created, str):
-                try:
-                    created_date = datetime.fromisoformat(account_created.replace('Z', '+00:00'))
-                    account_age_days = (datetime.utcnow() - created_date.replace(tzinfo=None)).days
-                except:
-                    pass
-            elif isinstance(account_created, datetime):
-                account_age_days = (datetime.utcnow() - account_created).days
-        
+        account_created = created_at
+        account_age_days = (now - account_created).days if account_created else 0
+
         stats = {
-            "total_active_sessions": total_sessions,
+            "total_active_sessions": total_active_for_user,
             "account_age_days": account_age_days,
             "email_verified": token_payload.get("email_verified", False),
-            "2fa_enabled": True,  # 2FA is mandatory in our system
-            "last_login": session_info["created_at"],
-            "security_score": calculate_security_score(token_payload, total_sessions)
+            "2fa_enabled": True,  # mandatory in our system
+            "last_login": session_created.isoformat() + "Z" if session_created.tzinfo is None else session_created.isoformat(),
+            "security_score": calculate_security_score(token_payload, total_active_for_user),
         }
-        
-        dashboard_data = DashboardData(
-            user=user_response,
-            session_info=session_data,
-            stats=stats
-        )
-        
+
+        dashboard_data = DashboardData(user=user_response, session_info=session_data, stats=stats)
+
         logger.info(f"Dashboard data retrieved successfully for: {user_email}")
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=dashboard_data.dict()
-        )
-        
+
+        return JSONResponse(status_code=status.HTTP_200_OK, content=dashboard_data.dict())
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error retrieving dashboard data: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while loading dashboard data"
+            detail="An error occurred while loading dashboard data",
         )
 
 
