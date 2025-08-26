@@ -2,6 +2,19 @@
 
 This document outlines the Supabase configuration required for the authentication backend.
 
+Note on environment and CORS:
+- Backend uses SITE_URL (frontend public URL) and BACKEND_URL (public backend URL). Ensure these are set in .env.
+- FastAPI CORS is configured to allow http://localhost:3000 and SITE_URL. Adjust in production accordingly.
+- Frontend should use its SITE_URL env for Supabase emailRedirectTo when applicable.
+
+Example (frontend):
+```js
+supabase.auth.signInWithOtp({
+  email,
+  options: { emailRedirectTo: `${import.meta.env.VITE_SITE_URL}/auth/callback` }
+});
+```
+
 ## Required Supabase Configuration
 
 ### 1. Project Setup

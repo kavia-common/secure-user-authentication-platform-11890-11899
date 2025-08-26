@@ -72,6 +72,7 @@ class EmailService:
                     <h2>Two-Factor Authentication</h2>
                     <p>Your verification code is: <strong>{otp_code}</strong></p>
                     <p>This code will expire in 10 minutes.</p>
+                    <p>Return to the site to complete verification: <a href="{settings.site_url}">{settings.site_url}</a></p>
                     <p>If you didn't request this code, please ignore this email.</p>
                 </body>
                 </html>
@@ -83,6 +84,7 @@ class EmailService:
                     <h2>Email Verification</h2>
                     <p>Your verification code is: <strong>{otp_code}</strong></p>
                     <p>This code will expire in 10 minutes.</p>
+                    <p>Continue verification on our site: <a href="{settings.site_url}">{settings.site_url}</a></p>
                     <p>If you didn't request this code, please ignore this email.</p>
                 </body>
                 </html>
@@ -170,6 +172,7 @@ class EmailService:
                 <h2>Welcome, {first_name}!</h2>
                 <p>Thank you for signing up for our platform.</p>
                 <p>Please verify your email address to complete your registration.</p>
+                <p>You can access your account here: <a href="{settings.site_url}">{settings.site_url}</a></p>
                 <p>If you have any questions, feel free to contact our support team.</p>
                 <br>
                 <p>Best regards,<br>The Team</p>

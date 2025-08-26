@@ -112,15 +112,10 @@ app = FastAPI(
 )
 
 # CORS middleware configuration
+# Centralized via settings.allowed_cors_origins to ensure SITE_URL is included.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.site_url,
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://localhost:3000",
-        "https://localhost:3001"
-    ],
+    allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -202,7 +197,10 @@ async def health_check():
         "status": "healthy",
         "message": "Supabase Authentication Backend is running",
         "version": "1.0.0",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "site_url": settings.site_url,
+        "backend_url": settings.backend_url,
+        "cors_allowed_origins": settings.allowed_cors_origins,
     }
 
 
@@ -236,6 +234,11 @@ async def api_status():
             "session_management": True,
             "user_profiles": True,
             "dashboard": True
+        },
+        "config": {
+            "site_url": settings.site_url,
+            "backend_url": settings.backend_url,
+            "cors_allowed_origins": settings.allowed_cors_origins,
         },
         "timestamp": time.time()
     }
