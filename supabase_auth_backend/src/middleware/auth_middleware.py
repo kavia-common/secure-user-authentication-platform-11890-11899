@@ -21,22 +21,22 @@ class AuthMiddleware:
     async def get_current_user(self, credentials: HTTPAuthorizationCredentials) -> Dict[str, Any]:
         """
         Get current user from access token
-        
+
         Args:
             credentials: HTTP authorization credentials
-            
+
         Returns:
             User information from token
-            
+
         Raises:
             HTTPException: If token is invalid or expired
         """
         try:
             token = credentials.credentials
-            
+
             # Validate session using token
             is_valid, session_data = session_service.validate_session(token)
-            
+
             if not is_valid or not session_data:
                 logger.warning("Invalid or expired session")
                 raise HTTPException(
@@ -44,7 +44,7 @@ class AuthMiddleware:
                     detail="Invalid or expired session",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            
+
             # Verify JWT token
             token_payload = jwt_service.verify_token(token)
             if not token_payload:
@@ -54,10 +54,10 @@ class AuthMiddleware:
                     detail="Invalid token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            
+
             # Extend session on activity
             session_service.extend_session(session_data["session_id"])
-            
+
             # Return user information
             return {
                 "user_id": session_data["user_id"],
@@ -65,7 +65,7 @@ class AuthMiddleware:
                 "session_id": session_data["session_id"],
                 "token_payload": token_payload
             }
-            
+
         except HTTPException:
             raise
         except Exception as e:

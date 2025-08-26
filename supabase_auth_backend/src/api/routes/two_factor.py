@@ -49,7 +49,16 @@ async def send_2fa_otp(
             )
         
         logger.info(f"2FA OTP send request for: {user_email}")
-        
+
+        # Only allow sending when 2FA is still required
+        token_payload = current_user.get("token_payload", {})
+        if token_payload.get("2fa_completed", False):
+            logger.info(f"2FA already completed; skipping OTP send for: {user_email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="2FA already completed for this session"
+            )
+
         # Send OTP email
         success, otp_code = await email_service.send_otp_email(user_email, purpose="2fa")
         
@@ -114,20 +123,28 @@ async def verify_2fa_otp(
         
         logger.info(f"2FA OTP verification attempt for: {user_email}")
         
+        # Ensure this is a preliminary session that still requires 2FA
+        token_payload = current_user.get("token_payload", {})
+        if token_payload.get("2fa_completed", False):
+            logger.info(f"2FA already completed for: {user_email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="2FA already completed for this session"
+            )
+
         # Verify OTP
         is_valid = email_service.verify_otp(user_email, request.otp_code, purpose="2fa")
-        
         if not is_valid:
             logger.warning(f"Invalid 2FA OTP for: {user_email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired OTP code"
             )
-        
-        # Revoke current session
+
+        # Revoke current preliminary session
         session_service.revoke_session(session_id)
-        
-        # Create new session with 2FA completed
+
+        # Create new final session with 2FA completed
         new_session_data = session_service.create_session(
             user_id=user_id,
             user_email=user_email,
@@ -136,11 +153,8 @@ async def verify_2fa_otp(
                 "2fa_completed": True
             }
         )
-        
-        # Get user info from token payload
-        token_payload = current_user.get("token_payload", {})
-        
-        # Prepare user response
+
+        # Prepare user response based on previous payload (profile metadata)
         user_response = UserResponse(
             id=user_id,
             email=user_email,
@@ -151,9 +165,9 @@ async def verify_2fa_otp(
             created_at=token_payload.get("created_at"),
             last_sign_in_at=token_payload.get("last_sign_in_at")
         )
-        
+
         logger.info(f"2FA OTP verified successfully for: {user_email}")
-        
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -204,7 +218,16 @@ async def resend_2fa_otp(
             )
         
         logger.info(f"2FA OTP resend request for: {user_email}")
-        
+
+        # Only allow resending when 2FA is still required
+        token_payload = current_user.get("token_payload", {})
+        if token_payload.get("2fa_completed", False):
+            logger.info(f"2FA already completed; skipping OTP resend for: {user_email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="2FA already completed for this session"
+            )
+
         # Send new OTP email (this will invalidate the previous one)
         success, otp_code = await email_service.send_otp_email(user_email, purpose="2fa")
         
@@ -250,15 +273,17 @@ async def get_2fa_status(current_user: Dict[str, Any] = Depends(get_current_user
     try:
         token_payload = current_user.get("token_payload", {})
         two_fa_completed = token_payload.get("2fa_completed", False)
-        
+        requiring_2fa = not two_fa_completed
+
         logger.info(f"2FA status check for: {current_user['email']} - Completed: {two_fa_completed}")
-        
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "message": f"2FA {'completed' if two_fa_completed else 'required'}",
                 "success": True,
-                "2fa_completed": two_fa_completed
+                "2fa_completed": two_fa_completed,
+                "requiring_2fa": requiring_2fa
             }
         )
         
